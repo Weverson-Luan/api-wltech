@@ -4,6 +4,7 @@ export type UpdateDebtorDto = {
   name?: string;
   description?: string;
   amount?: number;
+  principal_amount?: number;
   due_date?: string;
   status?: string;
   user_id_applicant?: number;
@@ -21,6 +22,7 @@ export function validateUpdateDebtorDto(body: UpdateDebtorDto): UpdateDebtorVali
     body.name !== undefined ||
     body.description !== undefined ||
     body.amount !== undefined ||
+    body.principal_amount !== undefined ||
     body.due_date !== undefined ||
     body.status !== undefined ||
     body.user_id_applicant !== undefined ||
@@ -45,6 +47,27 @@ export function validateUpdateDebtorDto(body: UpdateDebtorDto): UpdateDebtorVali
     } else if (Number(body.amount) <= 0) {
       errors.push({ field: 'amount', message: 'Valor deve ser maior que zero.' });
     }
+  }
+
+  if (body.principal_amount !== undefined) {
+    if (Number.isNaN(Number(body.principal_amount))) {
+      errors.push({ field: 'principal_amount', message: 'Valor pego deve ser numérico.' });
+    } else if (Number(body.principal_amount) <= 0) {
+      errors.push({ field: 'principal_amount', message: 'Valor pego deve ser maior que zero.' });
+    }
+  }
+
+  if (
+    body.amount !== undefined &&
+    body.principal_amount !== undefined &&
+    !Number.isNaN(Number(body.amount)) &&
+    !Number.isNaN(Number(body.principal_amount)) &&
+    Number(body.amount) < Number(body.principal_amount)
+  ) {
+    errors.push({
+      field: 'amount',
+      message: 'Valor a ser pago deve ser maior ou igual ao valor pego.',
+    });
   }
 
   if (body.due_date !== undefined) {
@@ -83,6 +106,7 @@ export function sanitizeUpdateDebtorDto(body: UpdateDebtorDto): UpdateDebtorDto 
   if (body.name !== undefined) sanitized.name = body.name.trim();
   if (body.description !== undefined) sanitized.description = body.description.trim();
   if (body.amount !== undefined) sanitized.amount = Number(body.amount);
+  if (body.principal_amount !== undefined) sanitized.principal_amount = Number(body.principal_amount);
   if (body.due_date !== undefined) sanitized.due_date = body.due_date.trim();
   if (body.status !== undefined) {
     sanitized.status = isValidDebtorStatus(body.status.trim().toLowerCase())

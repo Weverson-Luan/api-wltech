@@ -7,6 +7,7 @@ export function toDebtorResponse(debtor: DebtorRecord): DebtorResponseDto {
     name: debtor.name,
     description: debtor.description,
     amount: debtor.amount,
+    principal_amount: debtor.principal_amount,
     due_date: debtor.due_date,
     status: debtor.status,
     user_id_applicant: debtor.user_id_applicant,

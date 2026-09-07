@@ -7,6 +7,7 @@ export async function createDebtorService(dto: CreateDebtorDto) {
     name: dto.name,
     description: dto.description,
     amount: dto.amount,
+    principal_amount: dto.principal_amount,
     due_date: new Date(dto.due_date),
     status: dto.status,
     user_id_applicant: dto.user_id_applicant,

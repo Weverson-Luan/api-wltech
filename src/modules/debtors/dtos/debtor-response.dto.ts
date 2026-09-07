@@ -3,6 +3,7 @@ export type DebtorResponseDto = {
   name: string;
   description: string;
   amount: number;
+  principal_amount: number;
   due_date: Date;
   status: string;
   user_id_applicant: number;

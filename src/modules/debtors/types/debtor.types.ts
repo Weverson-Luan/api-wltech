@@ -3,6 +3,7 @@ export type DebtorRecord = {
   name: string;
   description: string;
   amount: number;
+  principal_amount: number;
   due_date: Date;
   status: string;
   user_id_applicant: number;
@@ -15,6 +16,7 @@ export type CreateDebtorRepositoryInput = {
   name: string;
   description: string;
   amount: number;
+  principal_amount: number;
   due_date: Date;
   status: string;
   user_id_applicant: number;
@@ -25,6 +27,7 @@ export type UpdateDebtorRepositoryInput = {
   name?: string;
   description?: string;
   amount?: number;
+  principal_amount?: number;
   due_date?: Date;
   status?: string;
   user_id_applicant?: number;

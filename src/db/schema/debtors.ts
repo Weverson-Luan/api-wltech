@@ -7,6 +7,7 @@ export const debtors = pgTable('debtors', {
   name: text('name').notNull(),
   description: text('description').notNull(),
   amount: doublePrecision('amount').notNull(),
+  principal_amount: doublePrecision('principal_amount').notNull(),
   due_date: timestamp('due_date', { mode: 'date' }).notNull(),
   status: text('status').notNull(),
   user_id_applicant: integer('user_id_applicant')
