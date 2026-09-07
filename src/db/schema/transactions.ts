@@ -5,6 +5,7 @@ import { users } from '@/db/schema/users.js';
 
 export const transactions = pgTable('transactions', {
   id: serial('id').primaryKey(),
+  uuid: text('uuid').unique(),
   user_id: integer('user_id')
     .notNull()
     .references(() => users.id),
@@ -14,6 +15,8 @@ export const transactions = pgTable('transactions', {
     .notNull()
     .references(() => categories.id),
   payment_method: text('payment_method').notNull(),
+  description: text('description').notNull().default(''),
+  notes: text('notes'),
   date: timestamp('date', { mode: 'date' }).notNull(),
   created_at: timestamp('created_at', { mode: 'date' }).notNull().defaultNow(),
   updated_at: timestamp('updated_at', { mode: 'date' }).notNull().defaultNow(),

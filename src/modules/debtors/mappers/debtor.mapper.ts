@@ -4,6 +4,7 @@ import type { DebtorRecord } from '@/modules/debtors/types/debtor.types.js';
 export function toDebtorResponse(debtor: DebtorRecord): DebtorResponseDto {
   return {
     id: debtor.id,
+    uuid: debtor.uuid,
     name: debtor.name,
     description: debtor.description,
     amount: debtor.amount,

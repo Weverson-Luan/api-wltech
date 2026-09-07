@@ -4,6 +4,7 @@ import { users } from '@/db/schema/users.js';
 
 export const debtors = pgTable('debtors', {
   id: serial('id').primaryKey(),
+  uuid: text('uuid').unique(),
   name: text('name').notNull(),
   description: text('description').notNull(),
   amount: doublePrecision('amount').notNull(),

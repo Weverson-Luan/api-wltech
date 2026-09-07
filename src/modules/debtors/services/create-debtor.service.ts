@@ -4,6 +4,7 @@ import { createDebtorRepository } from '@/modules/debtors/repositories/create-de
 
 export async function createDebtorService(dto: CreateDebtorDto) {
   const debtor = await createDebtorRepository({
+    uuid: dto.uuid,
     name: dto.name,
     description: dto.description,
     amount: dto.amount,

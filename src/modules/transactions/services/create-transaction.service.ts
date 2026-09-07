@@ -13,11 +13,14 @@ export async function createTransactionService(dto: CreateTransactionDto) {
   }
 
   const transaction = await createTransactionRepository({
+    uuid: dto.uuid,
     user_id: dto.user_id,
     type: dto.type,
     amount: dto.amount,
     category_id: dto.category_id,
     payment_method: dto.payment_method,
+    description: dto.description ?? '',
+    notes: dto.notes ?? null,
     date: new Date(dto.date),
   });
 

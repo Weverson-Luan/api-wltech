@@ -8,12 +8,15 @@ import {
 } from '@/modules/transactions/lib/transaction-fields.js';
 
 export type CreateTransactionDto = {
+  uuid?: string;
   user_id: number;
   type: string;
   amount: number;
   category_id: number;
   payment_method: string;
   date: string;
+  description?: string;
+  notes?: string | null;
 };
 
 export type CreateTransactionValidationError = {
@@ -66,11 +69,15 @@ export function validateCreateTransactionDto(
     errors.push({ field: 'date', message: 'Data inválida.' });
   }
 
+  if (body.description !== undefined && body.description !== null && !body.description.trim()) {
+    errors.push({ field: 'description', message: 'Descrição não pode ser vazia.' });
+  }
+
   return errors;
 }
 
 export function sanitizeCreateTransactionDto(body: CreateTransactionDto): CreateTransactionDto {
-  return {
+  const sanitized: CreateTransactionDto = {
     user_id: Number(body.user_id),
     type: isValidTransactionType(body.type.trim().toLowerCase())
       ? normalizeTransactionType(body.type)
@@ -81,5 +88,13 @@ export function sanitizeCreateTransactionDto(body: CreateTransactionDto): Create
       ? normalizePaymentMethod(body.payment_method)
       : body.payment_method.trim().toLowerCase(),
     date: body.date.trim(),
+    description: body.description?.trim() ?? '',
+    notes: body.notes ?? null,
   };
+
+  if (body.uuid !== undefined) {
+    sanitized.uuid = body.uuid.trim();
+  }
+
+  return sanitized;
 }

@@ -15,6 +15,13 @@
       "when": 1788812209873,
       "tag": "0001_misty_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788813023402,
+      "tag": "0002_red_iron_man",
+      "breakpoints": true
     }
   ]
 }

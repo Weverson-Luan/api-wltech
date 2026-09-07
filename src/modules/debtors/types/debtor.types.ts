@@ -1,5 +1,6 @@
 export type DebtorRecord = {
   id: number;
+  uuid: string | null;
   name: string;
   description: string;
   amount: number;
@@ -13,6 +14,7 @@ export type DebtorRecord = {
 };
 
 export type CreateDebtorRepositoryInput = {
+  uuid?: string;
   name: string;
   description: string;
   amount: number;

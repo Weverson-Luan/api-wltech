@@ -1,6 +1,7 @@
 import { isValidDebtorStatus, normalizeDebtorStatus, validateDebtorStatus } from '@/modules/debtors/lib/status.js';
 
 export type CreateDebtorDto = {
+  uuid?: string;
   name: string;
   description: string;
   amount: number;
@@ -91,7 +92,7 @@ export function validateCreateDebtorDto(body: CreateDebtorDto): CreateDebtorVali
 }
 
 export function sanitizeCreateDebtorDto(body: CreateDebtorDto): CreateDebtorDto {
-  return {
+  const sanitized: CreateDebtorDto = {
     name: body.name.trim(),
     description: body.description.trim(),
     amount: Number(body.amount),
@@ -103,4 +104,10 @@ export function sanitizeCreateDebtorDto(body: CreateDebtorDto): CreateDebtorDto 
     user_id_applicant: Number(body.user_id_applicant),
     user_id_owner: Number(body.user_id_owner),
   };
+
+  if (body.uuid !== undefined) {
+    sanitized.uuid = body.uuid.trim();
+  }
+
+  return sanitized;
 }

@@ -14,6 +14,8 @@ export type UpdateTransactionDto = {
   category_id?: number;
   payment_method?: string;
   date?: string;
+  description?: string;
+  notes?: string | null;
 };
 
 export type UpdateTransactionValidationError = {
@@ -31,7 +33,9 @@ export function validateUpdateTransactionDto(
     body.amount !== undefined ||
     body.category_id !== undefined ||
     body.payment_method !== undefined ||
-    body.date !== undefined;
+    body.date !== undefined ||
+    body.description !== undefined ||
+    body.notes !== undefined;
 
   if (!hasAnyField) {
     errors.push({ field: 'body', message: 'Informe ao menos um campo para atualizar.' });
@@ -72,6 +76,10 @@ export function validateUpdateTransactionDto(
     }
   }
 
+  if (body.description !== undefined && !body.description.trim()) {
+    errors.push({ field: 'description', message: 'Descrição não pode ser vazia.' });
+  }
+
   if (body.date !== undefined) {
     if (!body.date.trim()) {
       errors.push({ field: 'date', message: 'Data não pode ser vazia.' });
@@ -100,6 +108,8 @@ export function sanitizeUpdateTransactionDto(body: UpdateTransactionDto): Update
       : body.payment_method.trim().toLowerCase();
   }
   if (body.date !== undefined) sanitized.date = body.date.trim();
+  if (body.description !== undefined) sanitized.description = body.description.trim();
+  if (body.notes !== undefined) sanitized.notes = body.notes;
 
   return sanitized;
 }

@@ -4,12 +4,15 @@ import { transactions } from '@/db/schema/transactions.js';
 
 export const transactionWithCategorySelect = {
   id: transactions.id,
+  uuid: transactions.uuid,
   user_id: transactions.user_id,
   type: transactions.type,
   amount: transactions.amount,
   category_id: transactions.category_id,
   category_name: categories.name,
   payment_method: transactions.payment_method,
+  description: transactions.description,
+  notes: transactions.notes,
   date: transactions.date,
   created_at: transactions.created_at,
   updated_at: transactions.updated_at,

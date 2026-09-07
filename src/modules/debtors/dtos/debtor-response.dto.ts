@@ -1,5 +1,6 @@
 export type DebtorResponseDto = {
   id: number;
+  uuid: string | null;
   name: string;
   description: string;
   amount: number;

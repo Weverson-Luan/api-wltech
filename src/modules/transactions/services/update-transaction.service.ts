@@ -32,6 +32,8 @@ export async function updateTransactionService(id: number, dto: UpdateTransactio
     amount?: number;
     category_id?: number;
     payment_method?: string;
+    description?: string;
+    notes?: string | null;
     date?: Date;
     updated_at: Date;
   } = { updated_at: new Date() };
@@ -41,6 +43,8 @@ export async function updateTransactionService(id: number, dto: UpdateTransactio
   if (dto.amount !== undefined) updateData.amount = dto.amount;
   if (dto.category_id !== undefined) updateData.category_id = dto.category_id;
   if (dto.payment_method !== undefined) updateData.payment_method = dto.payment_method;
+  if (dto.description !== undefined) updateData.description = dto.description;
+  if (dto.notes !== undefined) updateData.notes = dto.notes;
   if (dto.date !== undefined) updateData.date = new Date(dto.date);
 
   const updated = await updateTransactionRepository(id, updateData);
