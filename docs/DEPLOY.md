@@ -1,43 +1,40 @@
-# Deploy da API WLTech na VPS
+# Tutorial: deploy da API WLTech em uma VPS
 
-Guia para subir a API e o PostgreSQL em produção com Docker, persistência de dados e deploy automático via GitHub Actions.
+Guia passo a passo para subir a API + PostgreSQL em qualquer VPS Ubuntu/Debian, com Docker, persistência de dados e deploy automático via GitHub Actions.
 
-## Arquitetura
-
-```mermaid
-flowchart LR
-  subgraph vps [VPS Ubuntu]
-    subgraph docker [Docker Compose api-wltech]
-      api[api :13333]
-      postgres[(postgres)]
-    end
-    volumes[(postgres_data)]
-  end
-
-  gh[GitHub Actions] -->|push image GHCR| ghcr[ghcr.io]
-  gh -->|SSH deploy| vps
-  ghcr -->|docker pull| api
-  api --> postgres
-  postgres --> volumes
-```
-
-| Componente | Porta no host | Observação |
-|------------|---------------|------------|
-| API | `13333` (configurável via `API_PORT`) | única porta publicada deste projeto |
-| PostgreSQL | **não publicada** | acessível só na rede Docker interna |
+**Tempo estimado:** 30–60 minutos (primeira vez)
 
 ---
 
-## 1. Preparar a VPS (Ubuntu/Debian)
+## O que você vai ter no final
 
-### 1.1 Usuário dedicado e diretório
+| Item | Valor padrão |
+|------|--------------|
+| API | `http://IP_DA_VPS:13333` |
+| Health check | `http://IP_DA_VPS:13333/health` |
+| PostgreSQL | só dentro do Docker (não exposto no host) |
+| Deploy automático | push na branch `main` |
+
+---
+
+## Pré-requisitos
+
+- VPS com Ubuntu 22.04+ ou Debian 12+
+- Acesso SSH (usuário com `sudo`)
+- Repositório no GitHub: `Weverson-Luan/api-wltech`
+- No seu Mac: Git, opcionalmente Node/pnpm para dev local
+
+---
+
+## Parte 1 — Preparar a VPS
+
+### 1.1 Conectar na VPS
 
 ```bash
-sudo adduser --disabled-password --gecos "" deploy
-sudo usermod -aG docker deploy
-sudo mkdir -p /opt/api-wltech
-sudo chown deploy:deploy /opt/api-wltech
+ssh SEU_USUARIO@IP_DA_VPS
 ```
+
+Exemplo: `ssh luandev@srv1965901.hostinger.com` ou `ssh luandev@203.0.113.10`
 
 ### 1.2 Instalar Docker
 
@@ -46,256 +43,427 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker $USER
 ```
 
-Reconecte na VPS para aplicar o grupo `docker`.
+**Desconecte e reconecte** no SSH para o grupo `docker` valer.
 
-### 1.3 Firewall
+Teste:
+
+```bash
+docker run hello-world
+```
+
+### 1.3 Criar pasta do projeto
+
+Escolha um caminho e use **sempre o mesmo** (importante para o GitHub Actions):
+
+```bash
+sudo mkdir -p /opt/workspace/api-wltech
+sudo chown $USER:$USER /opt/workspace/api-wltech
+```
+
+> Outro caminho comum: `/opt/api-wltech`. Se usar outro, anote — você precisará configurar `APP_DIR` no GitHub Actions (Parte 4).
+
+### 1.4 Firewall
 
 ```bash
 sudo ufw allow OpenSSH
 sudo ufw allow 13333/tcp
 sudo ufw enable
+sudo ufw status
 ```
 
-Se possível, restrinja `13333` a IPs confiáveis:
+Opcional — restringir a um IP:
 
 ```bash
 sudo ufw allow from SEU_IP to any port 13333 proto tcp
 ```
 
-### 1.4 Chave SSH para GitHub Actions
-
-No seu computador:
-
-```bash
-ssh-keygen -t ed25519 -C "github-actions-api-wltech" -f ~/.ssh/api-wltech-deploy
-```
-
-Copie a chave **pública** para a VPS (`~deploy/.ssh/authorized_keys`) e guarde a **privada** como secret `VPS_SSH_KEY` no GitHub.
-
 ---
 
-## 2. Clonar o projeto na VPS
+## Parte 2 — Clonar o projeto e configurar ambiente
+
+### 2.1 Clonar o repositório
 
 ```bash
-sudo -u deploy -H bash
-cd /opt/api-wltech
+cd /opt/workspace/api-wltech
 git clone https://github.com/Weverson-Luan/api-wltech.git .
-cp .env.production.example .env.production
 ```
 
-Edite `.env.production` com valores reais:
+### 2.2 Criar `.env.production`
 
-- `POSTGRES_PASSWORD` — senha forte
-- `DATABASE_URL` — deve apontar para `postgres` como host
-- `JWT_SECRET` — mínimo 32 caracteres
-- `API_PORT=13333` — evita conflito com outros projetos Docker
-- `API_IMAGE` — tag GHCR do repositório
+```bash
+cp .env.production.example .env.production
+nano .env.production
+```
 
-Gere um segredo JWT:
+Preencha com valores **reais**. Exemplo:
+
+```env
+NODE_ENV=production
+
+POSTGRES_USER=wltech
+POSTGRES_PASSWORD=MinhaSenhaForte123!
+POSTGRES_DB=wltech
+
+# Host "postgres" = nome do serviço Docker (NÃO use localhost aqui)
+DATABASE_URL=postgresql://wltech:MinhaSenhaForte123!@postgres:5432/wltech
+
+PORT=3333
+HOST=0.0.0.0
+API_PORT=13333
+
+JWT_SECRET=cole-aqui-um-segredo-com-pelo-menos-32-caracteres
+JWT_EXPIRES_IN=7d
+
+API_IMAGE=ghcr.io/weverson-luan/api-wltech:latest
+```
+
+Gerar `JWT_SECRET`:
 
 ```bash
 openssl rand -base64 48
 ```
 
-### Login no GHCR (primeira vez)
+**Regra crítica:** a senha em `POSTGRES_PASSWORD` deve ser **igual** à senha dentro de `DATABASE_URL`. Se mudar uma, mude a outra.
 
-Crie um Personal Access Token com `read:packages` e faça login na VPS:
+### 2.3 Variáveis explicadas
 
-```bash
-echo "SEU_PAT" | docker login ghcr.io -u SEU_USUARIO_GITHUB --password-stdin
-```
-
-Para repositório/pacote privado, configure também o secret `VPS_GHCR_TOKEN` no GitHub.
+| Variável | O que é |
+|----------|---------|
+| `POSTGRES_PASSWORD` | Senha do banco (gravada na 1ª criação do volume) |
+| `DATABASE_URL` | URL que a API usa para conectar (`@postgres:5432`) |
+| `API_PORT` | Porta publicada na VPS (padrão `13333`) |
+| `JWT_SECRET` | Segredo JWT — mínimo 32 caracteres em produção |
+| `API_IMAGE` | Imagem Docker no GHCR (Actions atualiza no deploy) |
 
 ---
 
-## 3. Primeiro deploy manual
+## Parte 3 — Primeiro deploy manual
+
+### 3.1 Comando correto do Docker Compose
+
+**Errado** (trata o arquivo como nome de serviço):
 
 ```bash
-cd /opt/api-wltech
-chmod +x scripts/deploy.sh
-
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+docker compose up -d docker-compose.prod.yml   # NÃO USE
 ```
 
-### Migrations (manual)
-
-Migrations não rodam automaticamente no deploy por enquanto. Na **primeira vez** e sempre que houver alteração de schema:
+**Certo** — sempre use `-f` para o arquivo e `--env-file` para produção:
 
 ```bash
-cd /opt/api-wltech
-pnpm install
-pnpm db:migrate
-```
+cd /opt/workspace/api-wltech
 
-Para isso, o PostgreSQL precisa estar acessível. Opções:
-
-- rodar `pnpm db:migrate` na sua máquina apontando para a VPS (não recomendado em produção), ou
-- instalar Node/pnpm na VPS e apontar `DATABASE_URL` para `localhost` **somente se** expuser temporariamente o Postgres (não faça isso), ou
-- executar na VPS com tunnel/rede interna usando um container one-off com o código do repo:
-
-```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres
+```
+
+Aguarde o Postgres ficar healthy:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production ps
+```
+
+### 3.2 Rodar migrations (obrigatório na 1ª vez)
+
+Migrations **não** rodam automaticamente no deploy. Execute na VPS:
+
+```bash
+cd /opt/workspace/api-wltech
+
 docker run --rm --network api-wltech_internal \
   -v "$(pwd):/app" -w /app \
   --env-file .env.production \
-  node:22-alpine sh -c "corepack enable && pnpm install && pnpm db:migrate"
+  node:22-alpine sh -c \
+  "corepack enable && corepack prepare pnpm@11.1.2 --activate && pnpm install && pnpm db:migrate"
 ```
 
-Validar:
+Saída esperada: `migrations applied successfully!`
+
+> Sempre que houver nova migration no repositório (`drizzle/*.sql`), repita este passo após `git pull`.
+
+### 3.3 Subir a API
+
+**Opção A — build local na VPS** (antes do Actions estar configurado):
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+**Opção B — imagem do GHCR** (após Parte 4):
+
+```bash
+echo "SEU_PAT" | docker login ghcr.io -u SEU_USUARIO_GITHUB --password-stdin
+docker compose -f docker-compose.prod.yml --env-file .env.production pull api
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+### 3.4 Validar
 
 ```bash
 curl http://127.0.0.1:13333/health
 ```
 
-> O seed de desenvolvimento **não** roda em produção. Crie o primeiro usuário via endpoint de registro.
+Resposta esperada:
+
+```json
+{
+  "success": true,
+  "status_code": 200,
+  "data": {
+    "status": "ok",
+    "database": "up",
+    "api": "up"
+  }
+}
+```
+
+Do seu computador:
+
+```bash
+curl http://IP_DA_VPS:13333/health
+```
+
+> Seed de desenvolvimento **não** roda em produção. Crie o primeiro usuário via `POST /register` ou endpoint de auth.
 
 ---
 
-## 4. GitHub Actions (deploy automático em produção)
+## Parte 4 — GitHub Actions (deploy automático)
 
-Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+### 4.1 Garantir que o código de deploy está na `main`
 
-**Gatilhos:**
-- push na branch `main` → deploy automático
-- botão **Run workflow** no GitHub (deploy manual)
+Estes arquivos precisam estar no GitHub:
 
-### Passo a passo no GitHub
+- `.github/workflows/deploy.yml`
+- `.github/workflows/ci.yml`
+- `Dockerfile`, `docker-compose.prod.yml`
+- `scripts/deploy.sh`
 
-1. Vá em **Settings → Secrets and variables → Actions**
-2. Crie os secrets abaixo
-3. (Opcional) Crie o environment **production** em **Settings → Environments** para controlar aprovações
-4. Faça push na `main` ou dispare o workflow manualmente
+Faça commit e push na branch `main`.
 
-### Secrets obrigatórios
+### 4.2 Secrets no GitHub
 
-| Secret | Descrição | Exemplo |
-|--------|-----------|---------|
-| `VPS_HOST` | IP ou hostname da VPS | `203.0.113.10` |
-| `VPS_USER` | usuário SSH com acesso ao Docker | `deploy` |
-| `VPS_SSH_KEY` | chave privada ed25519 (conteúdo completo do arquivo) | conteúdo de `api-wltech-deploy` |
+Repositório → **Settings → Secrets and variables → Actions → New repository secret**
 
-### Secrets opcionais
+| Secret | Obrigatório | Valor |
+|--------|-------------|-------|
+| `VPS_HOST` | Sim | IP ou hostname da VPS |
+| `VPS_USER` | Sim | usuário SSH (`luandev`, `deploy`, etc.) |
+| `VPS_SSH_KEY` | Sim | conteúdo completo da chave **privada** |
+| `VPS_SSH_PORT` | Não | `22` (padrão) |
+| `VPS_GHCR_TOKEN` | Recomendado | PAT com `read:packages` (ver abaixo) |
 
-| Secret | Descrição |
-|--------|-----------|
-| `VPS_SSH_PORT` | padrão `22` |
-| `VPS_GHCR_TOKEN` | PAT com `read:packages` — necessário se o pacote GHCR for **privado** |
+### 4.3 Criar chave SSH para o Actions
 
-### Como gerar a chave SSH para o Actions
-
-No seu computador:
+**No seu Mac:**
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-api-wltech" -f ~/.ssh/api-wltech-deploy -N ""
-cat ~/.ssh/api-wltech-deploy.pub   # coloque na VPS em ~/.ssh/authorized_keys
-cat ~/.ssh/api-wltech-deploy       # copie TUDO para o secret VPS_SSH_KEY
 ```
 
-Na VPS, confirme que o usuário `deploy` aceita a chave:
+**Chave pública → VPS** (`~/.ssh/authorized_keys` do usuário de deploy):
+
+```bash
+cat ~/.ssh/api-wltech-deploy.pub
+```
+
+Na VPS:
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
-echo "SUA_CHAVE_PUBLICA" >> ~/.ssh/authorized_keys
+echo "COLE_A_CHAVE_PUBLICA_AQUI" >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 ```
 
-### Fluxo a cada deploy
+**Chave privada → GitHub** secret `VPS_SSH_KEY`:
+
+```bash
+cat ~/.ssh/api-wltech-deploy
+```
+
+Copie **todo** o conteúdo (incluindo `-----BEGIN` e `-----END`).
+
+### 4.4 Criar `VPS_GHCR_TOKEN` (token do GitHub)
+
+Necessário se a imagem no GHCR for **privada**.
+
+1. Acesse: https://github.com/settings/tokens
+2. **Generate new token** → **Fine-grained token** (ou Classic)
+3. **Fine-grained:**
+   - Repository: `Weverson-Luan/api-wltech`
+   - Permissions → **Packages: Read**
+4. **Classic:** marque apenas **`read:packages`**
+5. Generate → copie o token
+6. GitHub do repo → Secrets → `VPS_GHCR_TOKEN` = cole o token
+
+**Alternativa:** após o primeiro build, torne o pacote público em **GitHub → Packages → api-wltech → Package settings → Change visibility → Public**.
+
+### 4.5 Caminho do projeto (`APP_DIR`)
+
+O workflow usa por padrão `/opt/api-wltech`. Se você clonou em outro lugar (ex.: `/opt/workspace/api-wltech`), adicione secret:
+
+| Secret | Valor |
+|--------|-------|
+| `APP_DIR` | `/opt/workspace/api-wltech` |
+
+E ajuste o workflow para passar `APP_DIR` no step SSH (ou exporte na VPS em `~/.bashrc`).
+
+Por enquanto, na VPS você pode criar symlink:
+
+```bash
+sudo ln -s /opt/workspace/api-wltech /opt/api-wltech
+```
+
+### 4.6 Disparar deploy
+
+- **Automático:** push na `main`
+- **Manual:** GitHub → **Actions → Deploy to Production → Run workflow**
+
+### 4.7 Fluxo do Actions
 
 ```mermaid
 sequenceDiagram
   participant Dev as Developer
-  participant GH as GitHub Actions
+  participant GH as GitHubActions
   participant CR as ghcr.io
   participant VPS as VPS
 
   Dev->>GH: push main
-  GH->>GH: pnpm build + docker build
-  GH->>CR: push image :sha e :latest
-  GH->>VPS: SSH + scripts/deploy.sh
+  GH->>GH: docker build runner
+  GH->>CR: push imagem :sha e :latest
+  GH->>VPS: SSH scripts/deploy.sh
   VPS->>CR: docker pull
   VPS->>VPS: up postgres + api
   VPS->>VPS: curl /health
 ```
 
-1. Build da imagem Docker e push para `ghcr.io/weverson-luan/api-wltech:SHA`
-2. SSH na VPS → `git pull` → `docker pull` → sobe postgres + API
-3. Healthcheck em `http://127.0.0.1:13333/health`
-4. Se falhar, tentativa de rollback para a imagem anterior
+---
 
-### Disparar deploy manual
+## Parte 5 — Comandos do dia a dia
 
-No GitHub: **Actions → Deploy to Production → Run workflow**
-
-### Verificar se funcionou
+Todos os comandos abaixo assumem:
 
 ```bash
-# Na VPS
-docker compose -f docker-compose.prod.yml --env-file .env.production ps
-curl http://127.0.0.1:13333/health
+cd /opt/workspace/api-wltech
+export DC="docker compose -f docker-compose.prod.yml --env-file .env.production"
 ```
 
-No GitHub: aba **Actions** do repositório — job verde = deploy OK.
+| Ação | Comando |
+|------|---------|
+| Ver status | `$DC ps` |
+| Logs da API | `$DC logs -f api` |
+| Logs do Postgres | `$DC logs -f postgres` |
+| Reiniciar API | `$DC restart api` |
+| Parar tudo | `$DC down` |
+| Subir tudo | `$DC up -d` |
+| Deploy manual (após Actions) | `chmod +x scripts/deploy.sh && ./scripts/deploy.sh` |
 
 ---
 
-## 5. Operação do dia a dia
+## Parte 6 — Replicar em outra VPS
 
-### Logs
+Checklist para **qualquer** VPS nova:
 
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production logs -f api
-docker compose -f docker-compose.prod.yml --env-file .env.production logs -f postgres
-```
+1. [ ] Instalar Docker + usuário no grupo `docker`
+2. [ ] Liberar portas `22` e `13333` no firewall
+3. [ ] Clonar repo no caminho definido (`APP_DIR`)
+4. [ ] Criar `.env.production` com senhas únicas para **esta** VPS
+5. [ ] `docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres`
+6. [ ] Rodar migrations (container one-off)
+7. [ ] Subir API (`up -d` ou via Actions)
+8. [ ] `curl http://127.0.0.1:13333/health`
+9. [ ] (Opcional) Atualizar secrets `VPS_HOST` / `VPS_SSH_KEY` se trocar de servidor
 
-### Deploy manual (mesmo fluxo do CI)
-
-```bash
-cd /opt/api-wltech
-./scripts/deploy.sh
-```
-
-### Verificar persistência
-
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production restart postgres api
-curl http://127.0.0.1:13333/health
-```
-
-Os dados permanecem no volume `api-wltech_postgres_data`.
+Cada VPS tem seu **próprio volume** `api-wltech_postgres_data` — dados não são compartilhados entre servidores.
 
 ---
 
-## 6. Portas para múltiplos projetos
+## Parte 7 — Múltiplos projetos na mesma VPS
 
-Cada projeto Docker na mesma VPS deve usar:
+Para não conflitar com outros Docker:
 
-- **rede Compose isolada** (`internal`)
-- **porta HTTP exclusiva no host** (`API_PORT`)
-- **PostgreSQL sem bind no host**
-
-Sugestão de mapa:
-
-| Projeto | API_PORT |
-|---------|----------|
+| Projeto | `API_PORT` sugerida |
+|---------|---------------------|
 | api-wltech | `13333` |
-| próximo projeto | `13334`, `13335`, ... |
+| outro projeto | `13334`, `13335`, ... |
+
+PostgreSQL deste projeto **não** publica porta no host — só a API expõe `API_PORT`.
 
 ---
 
-## 7. Próximo passo: domínio e HTTPS
+## Parte 8 — Domínio e HTTPS (próximo passo)
 
-Quando tiver domínio, coloque um proxy reverso compartilhado (Caddy, Traefik ou Nginx) nas portas `80/443` apontando para `127.0.0.1:13333`.
+Com domínio, use Caddy, Traefik ou Nginx nas portas `80/443` apontando para `127.0.0.1:13333`.
 
-Até lá, acesso por IP na porta `13333` é adequado para validação interna, mas **não** recomendado para produção pública com autenticação JWT sem TLS.
+Até lá, acesso por IP na porta `13333` serve para testes, mas **JWT sem HTTPS não é recomendado** em produção pública.
 
 ---
 
-## 8. Checklist para novo desenvolvedor
+## Problemas comuns
 
-1. Clonar o repositório
-2. `pnpm install && cp .env.example .env`
-3. `pnpm setup` (dev local)
-4. Alterar schema → `pnpm db:generate` → commitar SQL em `drizzle/`
-5. Push na `main` dispara deploy automático da API
-6. Rodar migrations manualmente na VPS quando houver mudança de schema
+### `no such service: docker-compose.prod.yml`
+
+Você esqueceu o `-f`:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+### `database: down` no `/health`
+
+- Senha diferente entre `POSTGRES_PASSWORD` e `DATABASE_URL`
+- Volume criado com senha antiga → recrie o volume (apaga dados):
+
+```bash
+$DC down
+docker volume rm api-wltech_postgres_data
+$DC up -d postgres
+# rode migrations de novo
+```
+
+### Actions falha: `Directory /opt/api-wltech not found`
+
+Clone no caminho esperado ou configure `APP_DIR` / symlink (Parte 4.5).
+
+### Actions falha no `docker pull`
+
+- Configure `VPS_GHCR_TOKEN` com `read:packages`
+- Ou torne o pacote GHCR público
+- Faça login manual na VPS: `docker login ghcr.io`
+
+### Actions falha: `Missing .env.production`
+
+Crie o arquivo na VPS: `cp .env.production.example .env.production`
+
+### Migrations pendentes após deploy
+
+```bash
+git pull
+# rode o comando de migrate da Parte 3.2
+$DC restart api
+```
+
+---
+
+## Referência rápida — arquivos importantes
+
+| Arquivo | Função |
+|---------|--------|
+| [`docker-compose.prod.yml`](../docker-compose.prod.yml) | Stack produção (API + Postgres) |
+| [`.env.production`](../.env.production.example) | Segredos da VPS (não versionar) |
+| [`scripts/deploy.sh`](../scripts/deploy.sh) | Script usado pelo GitHub Actions |
+| [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) | Pipeline CI/CD |
+
+---
+
+## Checklist final
+
+**VPS:**
+- [ ] Docker funcionando
+- [ ] Repo clonado
+- [ ] `.env.production` configurado
+- [ ] Postgres up + migrations aplicadas
+- [ ] API responde `/health`
+- [ ] Porta `13333` acessível externamente
+
+**GitHub:**
+- [ ] Secrets configurados
+- [ ] Push na `main` com arquivos de deploy
+- [ ] Workflow **Deploy to Production** verde

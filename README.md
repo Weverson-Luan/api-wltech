@@ -12,7 +12,7 @@ API REST com **Fastify**, **TypeScript**, **Drizzle ORM** e **PostgreSQL** (via 
 
 ### Deploy em produção (VPS + GitHub Actions)
 
-Deploy automático via GitHub Actions — guia completo: **[docs/DEPLOY.md](docs/DEPLOY.md)**
+Deploy automático via GitHub Actions — **tutorial passo a passo:** **[docs/DEPLOY.md](docs/DEPLOY.md)** (replicável em qualquer VPS)
 
 | Ambiente | Compose | Porta API |
 |----------|---------|-----------|
