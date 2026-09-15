@@ -1,3 +1,6 @@
+/**
+ * IMPORTS
+ */
 import 'dotenv/config';
 import './types/jwt.js';
 import Fastify from 'fastify';
