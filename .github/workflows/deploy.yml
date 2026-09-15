@@ -1,0 +1,109 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api-wltech-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image: ghcr.io/${{ steps.image.outputs.repository }}:${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image repository (lowercase)
+        id: image
+        run: echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.repository }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          API_IMAGE: ${{ needs.build.outputs.image }}
+          GHCR_TOKEN: ${{ secrets.VPS_GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+          REGISTRY: ${{ env.REGISTRY }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          envs: API_IMAGE,GHCR_TOKEN,GHCR_USERNAME,REGISTRY
+          script: |
+            set -euo pipefail
+
+            APP_DIR="${APP_DIR:-/opt/api-wltech}"
+
+            if [ ! -d "${APP_DIR}" ]; then
+              echo "Directory ${APP_DIR} not found. Clone the repo on the VPS first."
+              exit 1
+            fi
+
+            cd "${APP_DIR}"
+
+            if [ ! -f .env.production ]; then
+              echo "Missing .env.production in ${APP_DIR}"
+              exit 1
+            fi
+
+            chmod +x scripts/deploy.sh
+
+            API_IMAGE="${API_IMAGE}" \
+            GHCR_TOKEN="${GHCR_TOKEN}" \
+            GHCR_USERNAME="${GHCR_USERNAME}" \
+            REGISTRY="${REGISTRY}" \
+            ./scripts/deploy.sh

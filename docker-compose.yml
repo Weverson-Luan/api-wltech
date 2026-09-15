@@ -1,22 +1,44 @@
-# PostgreSQL para desenvolvimento e migrations (veja README).
+# Desenvolvimento local — API + PostgreSQL (veja README e docs/DEPLOY.md).
+name: api-wltech-dev
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: api-wltech-db
     restart: unless-stopped
     ports:
-      - '5432:5432'
+      - '${POSTGRES_PORT:-5433}:5432'
     environment:
-      POSTGRES_USER: wltech
-      POSTGRES_PASSWORD: wltech
-      POSTGRES_DB: wltech
+      POSTGRES_USER: ${POSTGRES_USER:-wltech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wltech}
+      POSTGRES_DB: ${POSTGRES_DB:-wltech}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U wltech -d wltech']
+      test: [ 'CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-wltech} -d ${POSTGRES_DB:-wltech}' ]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  api:
+    build:
+      context: .
+      target: dev
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-3333}:${PORT:-3333}'
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wltech}:${POSTGRES_PASSWORD:-wltech}@postgres:5432/${POSTGRES_DB:-wltech}
+      PORT: ${PORT:-3333}
+      HOST: 0.0.0.0
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-wltech-change-in-development}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    volumes:
+      - ./src:/app/src
+      - ./drizzle:/app/drizzle
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:

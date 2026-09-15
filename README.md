@@ -10,6 +10,26 @@ API REST com **Fastify**, **TypeScript**, **Drizzle ORM** e **PostgreSQL** (via 
 | pnpm       | 9+            |
 | Docker     | Para o banco  |
 
+### Deploy em produção (VPS + GitHub Actions)
+
+Deploy automático via GitHub Actions — guia completo: **[docs/DEPLOY.md](docs/DEPLOY.md)**
+
+| Ambiente | Compose | Porta API |
+|----------|---------|-----------|
+| Dev local | `docker-compose.yml` | `3333` |
+| Produção (VPS) | `docker-compose.prod.yml` | `13333` |
+
+**Fluxo:** push na `main` → GitHub Actions builda a imagem → publica no GHCR → faz SSH na VPS → sobe API + Postgres.
+
+**Secrets necessários no GitHub** (Settings → Secrets → Actions):
+
+| Secret | O que é |
+|--------|---------|
+| `VPS_HOST` | IP da VPS |
+| `VPS_USER` | usuário SSH (ex.: `deploy`) |
+| `VPS_SSH_KEY` | chave privada para SSH |
+| `VPS_GHCR_TOKEN` | (opcional) PAT se o pacote GHCR for privado |
+
 ---
 
 ## 1. Configuração inicial
@@ -22,7 +42,8 @@ cp .env.example .env
 Conteúdo padrão do `.env`:
 
 ```env
-DATABASE_URL=postgresql://wltech:wltech@localhost:5432/wltech
+POSTGRES_PORT=5433
+DATABASE_URL=postgresql://wltech:wltech@localhost:5433/wltech
 PORT=3333
 HOST=0.0.0.0
 JWT_SECRET=altere-para-um-segredo-forte-em-producao
@@ -31,27 +52,50 @@ JWT_EXPIRES_IN=7d
 
 > O `.env` não é versionado.
 
+### `DATABASE_URL`: `localhost` vs `postgres`
+
+| Onde você roda | Host correto | Exemplo |
+|----------------|--------------|---------|
+| Mac — `pnpm db:migrate`, `db:seed`, `db:studio`, DBeaver | `localhost` + `POSTGRES_PORT` | `postgresql://wltech:wltech@localhost:5433/wltech` |
+| Container `api` (Docker) | `postgres` | definido no `docker-compose.yml` |
+| VPS (produção) | `postgres` | definido no `docker-compose.prod.yml` |
+
+Se `pnpm db:migrate` falhar com host `postgres` no `.env`, troque para `localhost` ou use:
+
+```bash
+pnpm db:migrate:docker
+```
+
 ---
 
-## 2. Banco de dados (PostgreSQL + Docker)
+## 2. Docker (API + PostgreSQL)
+
+Sobe API e banco juntos:
 
 ```bash
 pnpm docker:up
 ```
 
-| Configuração | Valor padrão |
-|--------------|--------------|
-| Host         | `localhost:5432` |
-| Banco        | `wltech` |
-| Usuário/senha| `wltech` / `wltech` |
-| Driver       | `pg` |
-| ORM          | Drizzle |
+| Serviço | URL / porta |
+|---------|-------------|
+| API     | http://localhost:3333 |
+| Postgres| `localhost:5433` (porta `POSTGRES_PORT`, para DBeaver/migrate no host) |
+| Banco   | `wltech` |
+| Usuário/senha | `wltech` / `wltech` |
+
+A API no Docker usa hot reload (`tsx watch`) com `./src` montado como volume.
+
+Logs da API:
+
+```bash
+pnpm docker:logs
+```
 
 ### Resetar o banco local
 
 ```bash
 pnpm docker:down
-docker volume rm api-wltech_postgres_data 2>/dev/null || true
+docker volume rm api-wltech-dev_postgres_data 2>/dev/null || true
 pnpm docker:up
 pnpm db:migrate
 pnpm db:seed
@@ -90,11 +134,13 @@ pnpm db:studio
 | Comando | Quando usar |
 |---------|-------------|
 | `pnpm db:generate` | Depois de mudar o schema — gera SQL em `drizzle/` |
-| `pnpm db:migrate` | Aplica migrations pendentes |
+| `pnpm db:migrate` | Aplica migrations pendentes (no Mac, exige `@localhost` no `.env`) |
+| `pnpm db:migrate:docker` | Aplica migrations dentro do container `api` |
 | `pnpm db:push` | Sincroniza schema direto no Postgres (dev) |
 | `pnpm db:studio` | UI para inspecionar dados |
-| `pnpm docker:up` | Sobe PostgreSQL |
-| `pnpm docker:down` | Para PostgreSQL |
+| `pnpm docker:up` | Sobe API + PostgreSQL |
+| `pnpm docker:down` | Para API + PostgreSQL |
+| `pnpm docker:logs` | Logs da API em tempo real |
 
 ---
 
@@ -133,6 +179,14 @@ pnpm db:seed
 ```
 
 ### Desenvolvimento (hot reload)
+
+Com Docker (recomendado):
+
+```bash
+pnpm docker:up
+```
+
+Ou direto no host:
 
 ```bash
 pnpm dev
@@ -177,12 +231,14 @@ curl http://localhost:3333/budgets
 | `pnpm start` | Roda `dist/server.js` |
 | `pnpm setup` | `docker:up` + `db:migrate` + `db:seed` |
 | `pnpm db:generate` | Gera migration a partir do schema |
-| `pnpm db:migrate` | Executa migrations |
+| `pnpm db:migrate` | Executa migrations no host (`@localhost` no `.env`) |
+| `pnpm db:migrate:docker` | Executa migrations dentro do Docker |
 | `pnpm db:push` | Sincroniza schema no PostgreSQL |
 | `pnpm db:seed` | Popula dados de desenvolvimento |
 | `pnpm db:studio` | Abre Drizzle Studio |
-| `pnpm docker:up` | Sobe PostgreSQL |
-| `pnpm docker:down` | Para PostgreSQL |
+| `pnpm docker:up` | Sobe API + PostgreSQL |
+| `pnpm docker:down` | Para API + PostgreSQL |
+| `pnpm docker:logs` | Logs da API em tempo real |
 
 ---
 
@@ -238,7 +294,22 @@ pnpm db:seed
 
 ### Postgres não conecta
 
-Confirme que o container está rodando (`pnpm docker:up`) e que `DATABASE_URL` no `.env` usa `postgresql://wltech:wltech@localhost:5432/wltech`.
+Confirme que o container está rodando (`pnpm docker:up`) e que `DATABASE_URL` no `.env` usa a mesma porta de `POSTGRES_PORT` (ex.: `@localhost:5433`).
+
+### `pnpm db:migrate` falha silenciosamente (exit code 1)
+
+Causa comum: `.env` com `@postgres:5432`. O host `postgres` só existe **dentro** da rede Docker.
+
+Correção:
+
+```bash
+# Opção A — ajuste o .env para localhost
+POSTGRES_PORT=5433
+DATABASE_URL=postgresql://wltech:wltech@localhost:5433/wltech
+
+# Opção B — rode migrate dentro do container
+pnpm db:migrate:docker
+```
 
 ### Migration desatualizada após pull
 
