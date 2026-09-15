@@ -1,5 +1,5 @@
 /**
- * IMPORTS
+ * IMPORTSs
  */
 import 'dotenv/config';
 import './types/jwt.js';
