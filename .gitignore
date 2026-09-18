@@ -7,3 +7,8 @@ data/*.db
 data/*.db-*
 *.log
 .DS_Store
+docker-compose.prod.yml
+
+# Arquivos locais
+.pnpm-store/
+docker-compose.prod.yml
