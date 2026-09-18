@@ -17,9 +17,11 @@ Deploy automático via GitHub Actions — **tutorial passo a passo:** **[docs/DE
 | Ambiente | Compose | Porta API |
 |----------|---------|-----------|
 | Dev local | `docker-compose.yml` | `3333` |
-| Produção (VPS) | `docker-compose.prod.yml` | `13333` |
+| Produção (VPS) | `docker-compose.prod.yml` | `13333` só em localhost; público via Nginx `https://api.wltech.tech` |
 
 **Fluxo:** push na `main` → GitHub Actions builda a imagem → publica no GHCR → faz SSH na VPS → sobe API + Postgres.
+
+**HTTPS:** veja [docs/DEPLOY.md — Parte 8](docs/DEPLOY.md) (Nginx + Let's Encrypt / Certbot).
 
 **Secrets necessários no GitHub** (Settings → Secrets → Actions):
 

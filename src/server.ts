@@ -12,7 +12,7 @@ import { registerRoutes } from '@/routes/index.js';
 const port = env.PORT;
 const host = env.HOST;
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: true });
 
 await registerErrorHandler(app);
 await registerJwt(app);

@@ -39,7 +39,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
     ports:
-      - '${API_PORT:-13333}:${PORT:-3333}'
+      # Só localhost — Nginx (ou health check local) acessa; não exponha na internet
+      - '127.0.0.1:${API_PORT:-13333}:${PORT:-3333}'
     depends_on:
       postgres:
         condition: service_healthy

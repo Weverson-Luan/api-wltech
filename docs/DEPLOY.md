@@ -10,8 +10,9 @@ Guia passo a passo para subir a API + PostgreSQL em qualquer VPS Ubuntu/Debian, 
 
 | Item | Valor padrão |
 |------|--------------|
-| API | `http://IP_DA_VPS:13333` |
-| Health check | `http://IP_DA_VPS:13333/health` |
+| API (após Parte 8) | `https://api.wltech.tech` |
+| Health check | `https://api.wltech.tech/health` |
+| API (só na VPS) | `http://127.0.0.1:13333` (Nginx faz o proxy) |
 | PostgreSQL | só dentro do Docker (não exposto no host) |
 | Deploy automático | push na branch `main` |
 
@@ -64,18 +65,17 @@ sudo chown $USER:$USER /opt/workspace/api-wltech
 
 ### 1.4 Firewall
 
+Na primeira subida (antes do Nginx), libere SSH. A porta `13333` **não** precisa ficar pública — a API sobe só em `127.0.0.1`. Com HTTPS (Parte 8), libere `80` e `443`:
+
 ```bash
 sudo ufw allow OpenSSH
-sudo ufw allow 13333/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw enable
 sudo ufw status
 ```
 
-Opcional — restringir a um IP:
-
-```bash
-sudo ufw allow from SEU_IP to any port 13333 proto tcp
-```
+> Se ainda tiver regra antiga `13333/tcp` aberta para o mundo, remova após o Nginx: `sudo ufw delete allow 13333/tcp`.
 
 ---
 
@@ -131,7 +131,7 @@ openssl rand -base64 48
 |----------|---------|
 | `POSTGRES_PASSWORD` | Senha do banco (gravada na 1ª criação do volume) |
 | `DATABASE_URL` | URL que a API usa para conectar (`@postgres:5432`) |
-| `API_PORT` | Porta publicada na VPS (padrão `13333`) |
+| `API_PORT` | Porta só em localhost na VPS (padrão `13333`; Nginx faz proxy) |
 | `JWT_SECRET` | Segredo JWT — mínimo 32 caracteres em produção |
 | `API_IMAGE` | Imagem Docker no GHCR (Actions atualiza no deploy) |
 
@@ -215,11 +215,13 @@ Resposta esperada:
 }
 ```
 
-Do seu computador:
+Do seu computador (só após a Parte 8 — Nginx + HTTPS):
 
 ```bash
-curl http://IP_DA_VPS:13333/health
+curl https://api.wltech.tech/health
 ```
+
+Antes do domínio, o health check público **não** fica disponível (a API escuta só em `127.0.0.1:13333`). Valide via SSH na VPS com o `curl` acima em `127.0.0.1`.
 
 > Seed de desenvolvimento **não** roda em produção. Crie o primeiro usuário via `POST /register` ou endpoint de auth.
 
@@ -362,14 +364,15 @@ export DC="docker compose -f docker-compose.prod.yml --env-file .env.production"
 Checklist para **qualquer** VPS nova:
 
 1. [ ] Instalar Docker + usuário no grupo `docker`
-2. [ ] Liberar portas `22` e `13333` no firewall
+2. [ ] Liberar portas `22`, `80` e `443` no firewall (não abra `13333` publicamente)
 3. [ ] Clonar repo no caminho definido (`APP_DIR`)
 4. [ ] Criar `.env.production` com senhas únicas para **esta** VPS
 5. [ ] `docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres`
 6. [ ] Rodar migrations (container one-off)
 7. [ ] Subir API (`up -d` ou via Actions)
 8. [ ] `curl http://127.0.0.1:13333/health`
-9. [ ] (Opcional) Atualizar secrets `VPS_HOST` / `VPS_SSH_KEY` se trocar de servidor
+9. [ ] Configurar Nginx + HTTPS (Parte 8) e validar `https://api.wltech.tech/health`
+10. [ ] (Opcional) Atualizar secrets `VPS_HOST` / `VPS_SSH_KEY` se trocar de servidor
 
 Cada VPS tem seu **próprio volume** `api-wltech_postgres_data` — dados não são compartilhados entre servidores.
 
@@ -384,15 +387,135 @@ Para não conflitar com outros Docker:
 | api-wltech | `13333` |
 | outro projeto | `13334`, `13335`, ... |
 
-PostgreSQL deste projeto **não** publica porta no host — só a API expõe `API_PORT`.
+PostgreSQL deste projeto **não** publica porta no host. A API publica `API_PORT` **apenas em `127.0.0.1`** — o acesso externo é via Nginx (80/443).
 
 ---
 
-## Parte 8 — Domínio e HTTPS (próximo passo)
+## Parte 8 — Domínio e HTTPS (Nginx + Let's Encrypt)
 
-Com domínio, use Caddy, Traefik ou Nginx nas portas `80/443` apontando para `127.0.0.1:13333`.
+Arquitetura:
 
-Até lá, acesso por IP na porta `13333` serve para testes, mas **JWT sem HTTPS não é recomendado** em produção pública.
+```text
+Cliente → https://api.wltech.tech:443 → Nginx (TLS) → 127.0.0.1:13333 → API Docker
+```
+
+Config versionada: [`deploy/nginx/api-wltech.conf`](../deploy/nginx/api-wltech.conf).
+
+### 8.1 DNS
+
+No Hostinger (domínio `wltech.tech` → **Gerenciar** → DNS), crie um registro **A** (e **AAAA** se tiver IPv6) apontando `api` / `api.wltech.tech` para o IP público da VPS.
+
+Aguarde propagação:
+
+```bash
+dig +short api.wltech.tech
+# deve retornar o IP da VPS
+```
+
+### 8.2 Garantir API só em localhost
+
+Com o compose atualizado, recrie o serviço (se a API já estava publicada em `0.0.0.0:13333`):
+
+```bash
+cd /opt/workspace/api-wltech   # ou /opt/api-wltech
+git pull
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+curl http://127.0.0.1:13333/health
+```
+
+### 8.3 Instalar Nginx e Certbot
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo systemctl enable --now nginx
+```
+
+### 8.4 Bootstrap HTTP (primeiro certificado)
+
+O arquivo completo do repo já espera os certificados em `/etc/letsencrypt/...`. Na **primeira** vez, use um site temporário só na porta 80 para o Certbot emitir o cert:
+
+```bash
+sudo tee /etc/nginx/sites-available/api-wltech >/dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.wltech.tech;
+
+    location / {
+        proxy_pass http://127.0.0.1:13333;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+```
+
+Habilite o site:
+
+```bash
+sudo ln -sf /etc/nginx/sites-available/api-wltech /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Emita o certificado (o plugin do Nginx ajusta SSL automaticamente):
+
+```bash
+sudo certbot --nginx -d api.wltech.tech
+```
+
+Siga o prompt (e-mail, ToS). Valide:
+
+```bash
+curl https://api.wltech.tech/health
+```
+
+### 8.5 (Opcional) Alinhar com a config versionada do repo
+
+Depois do Certbot, você pode substituir pelo arquivo do repositório (já com redirect HTTP→HTTPS, upstream e timeouts):
+
+```bash
+cd /opt/workspace/api-wltech
+sudo cp deploy/nginx/api-wltech.conf /etc/nginx/sites-available/api-wltech
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Confirme que os caminhos SSL batem com o domínio:
+
+```bash
+sudo ls /etc/letsencrypt/live/
+```
+
+### 8.6 Firewall definitivo
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw delete allow 13333/tcp 2>/dev/null || true
+sudo ufw status
+```
+
+### 8.7 Renovação automática
+
+O Certbot instala um timer/systemd. Teste:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+### 8.8 Checklist HTTPS
+
+- [ ] DNS aponta para a VPS
+- [ ] `curl http://127.0.0.1:13333/health` OK na VPS
+- [ ] Nginx ativo e site habilitado
+- [ ] Certificado emitido (`certbot certificates`)
+- [ ] `curl https://api.wltech.tech/health` OK de fora
+- [ ] Porta `13333` **não** aberta no UFW para a internet
 
 ---
 
@@ -440,6 +563,21 @@ git pull
 $DC restart api
 ```
 
+### Certbot / Nginx: `Connection refused` no proxy
+
+A API precisa estar up em localhost:
+
+```bash
+curl http://127.0.0.1:13333/health
+docker compose -f docker-compose.prod.yml --env-file .env.production ps
+```
+
+### Certbot falha na validação HTTP-01
+
+- DNS ainda não aponta para a VPS (`dig +short api.wltech.tech`)
+- Portas `80`/`443` bloqueadas no UFW ou no painel da Hostinger
+- Site default do Nginx ainda ativo e capturando a porta 80
+
 ---
 
 ## Referência rápida — arquivos importantes
@@ -448,6 +586,7 @@ $DC restart api
 |---------|--------|
 | [`docker-compose.prod.yml`](../docker-compose.prod.yml) | Stack produção (API + Postgres) |
 | [`.env.production`](../.env.production.example) | Segredos da VPS (não versionar) |
+| [`deploy/nginx/api-wltech.conf`](../deploy/nginx/api-wltech.conf) | Reverse proxy Nginx + HTTPS |
 | [`scripts/deploy.sh`](../scripts/deploy.sh) | Script usado pelo GitHub Actions |
 | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) | Pipeline CI/CD |
 
@@ -460,8 +599,9 @@ $DC restart api
 - [ ] Repo clonado
 - [ ] `.env.production` configurado
 - [ ] Postgres up + migrations aplicadas
-- [ ] API responde `/health`
-- [ ] Porta `13333` acessível externamente
+- [ ] API responde em `http://127.0.0.1:13333/health`
+- [ ] Nginx + Certbot (Parte 8) e `https://api.wltech.tech/health`
+- [ ] Portas `80`/`443` abertas; `13333` **não** pública
 
 **GitHub:**
 - [ ] Secrets configurados
